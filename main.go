@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -9,57 +10,72 @@ import (
 	"time"
 )
 
-func client(message chan string, ch chan time.Time, interval time.Duration) {
-	for {
-		message <- "Current time: "
-		ch <- time.Now()
-		time.Sleep(time.Second * interval)
-	}
-
-
+type message struct {
+	time time.Time
+	msg  string
 }
 
-func server(message chan string, ch chan time.Time)  {
+
+func client(chMessage chan message, interval time.Duration, group *sync.WaitGroup, ctx context.Context) {
+	defer group.Done()
+	for {
+		time.Sleep(interval)
+		select {
+			case chMessage <- message{
+				time: time.Now(),
+				msg:  "Current time:",
+		}:
+		case <- ctx.Done():
+			fmt.Println("Time out")
+			return
+		}
+
+	}
+}
+
+func server(chMessage chan message, group *sync.WaitGroup, ctx context.Context) {
+	defer group.Done()
 	for {
 		select {
-		case msg, ok := <- message:
+		case message, ok := <-chMessage:
 			if !ok {
 				return
 			}
-			fmt.Println(msg)
+			fmt.Println(message.msg, message.time)
+		case <- ctx.Done():
+			return
 
-		case timestamp, ok := <- ch:
-			if !ok {
-				return
-			}
-			fmt.Println(timestamp)
+		default:
+			time.Sleep(time.Second * 1)
 		}
 	}
-
 }
-
 
 func main() {
 	file, err := os.Open("config")
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	bytes, err := ioutil.ReadAll(file)
 	if err != nil {
-		fmt.Println(err.Error())
+		log.Fatal(err)
 	}
-	seconds := bytes[0]
-	interval := time.Duration(seconds)
+
+	duration, err := time.ParseDuration(string(bytes))
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	wg := sync.WaitGroup{}
-	defer wg.Done()
 	wg.Add(2)
 
-	ch := make(chan time.Time)
-	message := make(chan string)
+	messages := make(chan message, 5)
 
-	go client(message, ch, interval)
-	go server(message, ch)
-
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*60)
+	defer cancel()
+	
+	go client(messages, duration, &wg, ctx)
+	go server(messages, &wg, ctx)
 	wg.Wait()
 }
