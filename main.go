@@ -15,18 +15,18 @@ type message struct {
 	msg  string
 }
 
-
 func client(chMessage chan message, interval time.Duration, group *sync.WaitGroup, ctx context.Context) {
 	defer group.Done()
 	for {
 		time.Sleep(interval)
 		select {
-			case chMessage <- message{
-				time: time.Now(),
-				msg:  "Current time:",
+		case chMessage <- message{
+			time: time.Now(),
+			msg:  "Current time:",
 		}:
-		case <- ctx.Done():
+		case <-ctx.Done():
 			fmt.Println("Time out")
+			close(chMessage)
 			return
 		}
 
@@ -42,11 +42,11 @@ func server(chMessage chan message, group *sync.WaitGroup, ctx context.Context) 
 				return
 			}
 			fmt.Println(message.msg, message.time)
-		case <- ctx.Done():
+		case <-ctx.Done():
 			return
 
 		default:
-			time.Sleep(time.Second * 1)
+			time.Sleep(time.Second * 5)
 		}
 	}
 }
@@ -74,7 +74,7 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*60)
 	defer cancel()
-	
+
 	go client(messages, duration, &wg, ctx)
 	go server(messages, &wg, ctx)
 	wg.Wait()
